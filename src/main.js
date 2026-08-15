@@ -8,6 +8,28 @@ import { data } from "./pictures2";
 import * as m from "./materls";
 
 window.onload = function () {
+  // 加载进度条
+  const loader = document.createElement("div");
+  loader.id = "loading-screen";
+  loader.innerHTML = `
+    <div class="loading-card">
+      <div class="loading-title">正在加载展厅...</div>
+      <div class="loading-bar"><div class="loading-bar-inner" id="loading-bar-inner"></div></div>
+      <div class="loading-text" id="loading-text">准备中 0%</div>
+    </div>`;
+  document.body.appendChild(loader);
+
+  const barInner = document.getElementById("loading-bar-inner");
+  const barText = document.getElementById("loading-text");
+  let loadedCount = 0;
+  const totalSteps = 6; // 厅模型、贴图、展品、3只动物
+  function updateProgress(step, label) {
+    loadedCount++;
+    const pct = Math.min(100, Math.round((loadedCount / totalSteps) * 100));
+    barInner.style.width = pct + "%";
+    barText.textContent = `${label} ${pct}%`;
+  }
+
   // 实例化
   const vr = new VRHall({
     debugger: false, // 开启调试模式
@@ -25,28 +47,15 @@ window.onload = function () {
     },
   });
 
-  // 加载厅模型
+  // 加载厅模型（最先加载）
   vr.loadHall({
     url: "./assets/room2/dm.glb",
-    planeName: "dm", // plane , meishu01
-    // position: { x: 2, y: -0.2, z: 2 },
+    planeName: "dm",
     position: { x: 0, y: 0, z: 0 },
     scale: 1,
-    onProgress: (p) => {
-      console.log("加载进度", p);
-    },
   }).then((gltf) => {
-    // 正常gltf模型无需设置这些参数，因为网上找的模型，直接拷贝过来的代码
-    gltf.scene.traverse(function (child) {
-      if (child.isMesh) {
-        // ...
-      }
+    updateProgress(1, "加载展厅模型");
 
-      // if (child.material) {
-      //   child.material.emissiveMap = child.material.map;
-      // }
-    });
-    
     const dm_OBJ = gltf.scene.getObjectByName("dm");
     dm_OBJ.material = m.dm_M;
     const dm2_OBJ = gltf.scene.getObjectByName("dm2");
@@ -92,99 +101,94 @@ window.onload = function () {
     const baiding_OBJ = gltf.scene.getObjectByName("baiding");
     baiding_OBJ.material = m.baiding_M;
 
-    // 自定义info
-    const info3d = gltf.scene.getObjectByName("jianjieqiang");
-    info3d.material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      map: new THREE.TextureLoader().load("./assets/pictures2/main.jpg"),       
-      // depthFunc: 3,
+    updateProgress(2, "设置墙面贴图");
+
+    // 简介墙贴图（使用异步加载避免阻塞）
+    new THREE.TextureLoader().load(
+      "./assets/pictures2/main.jpg",
+      (tex) => {
+        const info3d = gltf.scene.getObjectByName("jianjieqiang");
+        info3d.material = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          map: tex,
+        });
+        updateProgress(3, "加载简介墙");
+      }
+    );
+
+    // 加载展品数据（画框）
+    vr.loadItems(data);
+    updateProgress(4, "加载展品");
+
+    // 等待一帧，保证场景已渲染出展厅，再加载动物模型
+    requestAnimationFrame(() => {
+      // 同时并行加载3只动物，但狗模型最大的最后加载
+      Promise.all([
+        // 1. 羊（334KB，小）
+        vr.loadGLTF({
+          scale: 0.1,
+          position: {
+            x:0.14009586306492472,y:1.072579028432172,z:3.3849787954383963
+          },
+          rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          autoLight: true,
+          url: `./assets/robot/sheep.glb`,
+        }).then((gltf) => {
+          gltf.scene.odata = {
+            id: "sheep",
+            name: "一只丑丑的乖小羊",
+            desc: "学名：乖小半。2022年2月27日出生于小白猪口袋。<br>补档礼包：芋泥啵啵和竹马一起刷起来：柏里挑怡，一见倾心！",
+          };
+          vr.addClickEvent(gltf.scene);
+          vr.createAnimate(gltf, { animateIndex: 0, duration: 60 });
+          updateProgress(5, "加载动物模型");
+        }),
+
+        // 2. 飞猪（977KB）
+        vr.loadGLTF({
+          url: "./assets/robot/fly_pig.glb",
+          position: {
+            x: 19.655541400079763,
+            y: 0.3955837972716467,
+            z: 3.3849787954383963,
+          },
+          rotation: { x: 0, y: -Math.PI / 2, z: 0 },
+          scale: 0.4,
+        }).then((gltf) => {
+          gltf.scene.odata = {
+            id: "pig",
+            name: "一只小丑猪",
+            desc: '学名：朱怡欣。1998年4月22日出生于浙江金华。<br>补档礼包：<a href="https://weibo.com/6219760128/5231569460791347" target="_blank" rel="noopener noreferrer">点击查看俺老猪传奇人生</a>',
+          };
+          vr.addClickEvent(gltf.scene);
+          vr.createAnimate(gltf, { animateIndex: 0, duration: 5 });
+        }),
+
+        // 3. 狗模型最大（5.86MB），放在最后加载
+        vr.loadGLTF({
+          scale: 4,
+          position: {
+            x:-9.742667925899568,y:1.072579028432172,z:3.3849787954383945
+          },
+          rotation: { x:-1.5707963267948968,y:0.11470034394452681,z:1.5707963267948966 },
+          url: `./assets/robot/dog.glb`,
+        }).then((gltf) => {
+          gltf.scene.odata = {
+            id: "dog",
+            name: "一只比丑小猪和丑小羊好一点的丑小狗",
+            desc: '学名：柏欣妤。1997年1月25日出生于江苏盐城。<br>补档礼包：<a href="https://weibo.com/6387562987/4820881443127656" target="_blank" rel="noopener noreferrer">点击查看俺老狗传奇人生</a>',
+          };
+          vr.addClickEvent(gltf.scene);
+          updateProgress(6, "加载完成");
+          // 全部加载完毕，淡出进度条
+          setTimeout(() => {
+            loader.classList.add("fade-out");
+            setTimeout(() => loader.remove(), 600);
+          }, 400);
+        }),
+      ]);
     });
   });
-
-  // 加载机器人
-  vr.loadGLTF({
-    url: "./assets/robot/fly_pig.glb",
-    position: {
-      x: 19.655541400079763,
-      y: 0.3955837972716467,
-      z: 3.3849787954383963,
-    },
-    // autoLight: true,
-    rotation: { x: 0, y: -Math.PI / 2, z: 0 },
-    scale: 0.4,
-  }).then((gltf) => {
-    gltf.scene.odata = { 
-      id: "pig",
-      name: "一只小丑猪",
-      desc: '学名：朱怡欣。1998年4月22日出生于浙江金华。<br>补档礼包：<a href="https://weibo.com/6219760128/5231569460791347" target="_blank" rel="noopener noreferrer">点击查看俺老猪传奇人生</a>',
-     };
-    vr.addClickEvent(gltf.scene);
-    // 调用动画
-    vr.createAnimate(gltf, { animateIndex: 0, duration: 5 });
-  });
-
-  // 加载羊模型
-  vr.loadGLTF({
-    scale: 0.1,
-    position: {
-      x:0.14009586306492472,y:1.072579028432172,z:3.3849787954383963
-    },
-    rotation: { x: 0, y: Math.PI / 2, z: 0 },
-    autoLight: true,
-    url: `./assets/robot/sheep.glb`,
-  }).then((gltf) => {
-    gltf.scene.odata = { 
-      id: "sheep",
-      name: "一只丑丑的乖小羊",
-      desc: "学名：乖小半。2022年2月27日出生于小白猪口袋。<br>补档礼包：芋泥啵啵和竹马一起刷起来：柏里挑怡，一见倾心！",
-     };
-    vr.addClickEvent(gltf.scene);
-    // 调用动画
-    vr.createAnimate(gltf, { animateIndex: 0, duration: 60 });
-  });
-
-  // 加载狗模型
-  vr.loadGLTF({
-    scale: 4,
-    position: {
-      x:-9.742667925899568,y:1.072579028432172,z:3.3849787954383945
-    },
-    rotation: { x:-1.5707963267948968,y:0.11470034394452681,z:1.5707963267948966 },
-    url: `./assets/robot/dog.glb`,
-  }).then((gltf) => {
-    gltf.scene.odata = { 
-      id: "dog",
-      name: "一只比丑小猪和丑小羊好一点的丑小狗",
-      desc: '学名：柏欣妤。1997年1月25日出生于江苏盐城。<br>补档礼包：<a href="https://weibo.com/6387562987/4820881443127656" target="_blank" rel="noopener noreferrer">点击查看俺老狗传奇人生</a>',
-     };
-    vr.addClickEvent(gltf.scene);
-  });
-
-  // // 加载房模型
-  // vr.loadGLTF({
-  //   scale: 0.4,
-  //   position: {
-  //     x: -9.697628171904498,
-  //     y: 1.6742415555214554,
-  //     z: 3.343388656678843,
-  //   },
-  //   rotation: {
-  //     x: -3.141592653589793,
-  //     y: 0.03132610956215899,
-  //     z: -3.141592653589793,
-  //   },
-  //   url: `./assets/gltfs/feichuan.glb`,
-  //   autoLight: true,
-  // }).then((gltf) => {
-  //   gltf.scene.odata = { id: "man" };
-  //   vr.addClickEvent(gltf.scene);
-  //   vr.createAnimate(gltf, { animateIndex: 0, duration: 60 });
-  // });
-
-  // 加载画框数据
-  vr.loadItems(data);
-
-  // vr.initVRButton();
 
   // 导览点
   let shtml = "";

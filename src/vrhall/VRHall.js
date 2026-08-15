@@ -589,44 +589,56 @@ export class VRHall {
   loadItems(data) {
     this._itemsData = data;
     const { maxSize } = this._options;
-    data.forEach(async (item) => {
-      const texture = await this._textLoader.loadAsync(item.url);
-      if (texture.image.width > maxSize) {
-        item.width = maxSize;
-        item.height = (maxSize / texture.image.width) * texture.image.height;
-      } else {
-        item.height = MAX;
-        item.width = (maxSize / texture.image.height) * texture.image.width;
-      }
 
-      const geometry = new THREE.BoxGeometry(
-        item.width,
-        item.height,
-        item.depth ? item.depth : 2
-      );
-      const materialBorder = new THREE.MeshBasicMaterial({
-        color: item.color ? item.color : "#ffffff",
-        map: this._textLoader.load("./assets/room1/wall.png"),
+    // 并行加载所有展品贴图，全部完成后统一创建画框
+    const promises = data.map((item) => {
+      return this._textLoader.loadAsync(item.url).then((texture) => {
+        return { item, texture };
       });
-      const material = new THREE.MeshBasicMaterial({
-        color: item.color ? item.color : "#ffffff",
-        map: texture,
+    });
+
+    Promise.all(promises).then((results) => {
+      // 加载边框贴图（复用同一张，只加载一次）
+      const borderTexture = this._textLoader.load("./assets/room1/wall.png");
+
+      results.forEach(({ item, texture }) => {
+        if (texture.image.width > maxSize) {
+          item.width = maxSize;
+          item.height = (maxSize / texture.image.width) * texture.image.height;
+        } else {
+          item.height = MAX;
+          item.width = (maxSize / texture.image.height) * texture.image.width;
+        }
+
+        const geometry = new THREE.BoxGeometry(
+          item.width,
+          item.height,
+          item.depth ? item.depth : 2
+        );
+        const materialBorder = new THREE.MeshBasicMaterial({
+          color: item.color ? item.color : "#ffffff",
+          map: borderTexture,
+        });
+        const material = new THREE.MeshBasicMaterial({
+          color: item.color ? item.color : "#ffffff",
+          map: texture,
+        });
+        const cube = new THREE.Mesh(geometry, [
+          materialBorder,
+          materialBorder,
+          materialBorder,
+          materialBorder,
+          materialBorder,
+          material,
+        ]);
+        cube.name = item.name;
+        cube.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
+        cube.scale.set(item.scale.x, item.scale.y, item.scale.z);
+        cube.position.set(item.position.x, item.position.y, item.position.z);
+        cube.odata = item;
+        this._scene.add(cube);
+        this._eventMeshs.push(cube);
       });
-      const cube = new THREE.Mesh(geometry, [
-        materialBorder,
-        materialBorder,
-        materialBorder,
-        materialBorder,
-        materialBorder,
-        material,
-      ]);
-      cube.name = item.name;
-      cube.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
-      cube.scale.set(item.scale.x, item.scale.y, item.scale.z);
-      cube.position.set(item.position.x, item.position.y, item.position.z);
-      cube.odata = item;
-      this._scene.add(cube);
-      this._eventMeshs.push(cube);
     });
   }
 
